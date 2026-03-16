@@ -1,0 +1,20 @@
+[package]
+name = "motosan-tool"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/motosan-dev/motosan-tool"
+homepage = "https://github.com/motosan-dev/motosan-tool"
+description = "Shared AI agent tool kit — traits, registry, and built-in tools for LLM agents"
+authors = ["motosan-dev"]
+keywords = ["ai", "agent", "tool", "llm", "bot"]
+categories = ["development-tools"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
