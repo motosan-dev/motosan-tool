@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Dict, List, Tuple, Type, Union
 
 from .error import ToolError
 
@@ -20,7 +20,7 @@ from .error import ToolError
 # ToolContent  (tagged union)
 # ---------------------------------------------------------------------------
 
-_JSON = dict[str, Any] | list[Any] | str | int | float | bool | None
+_JSON = Union[Dict[str, Any], List[Any], str, int, float, bool, None]
 """Alias for JSON-compatible Python values."""
 
 
@@ -52,7 +52,7 @@ class JsonContent:
         return cls(data=data["data"])
 
 
-ToolContent = TextContent | JsonContent
+ToolContent = Union[TextContent, JsonContent]
 """Tagged union of content blocks (mirrors Rust ``ToolContent`` enum)."""
 
 
@@ -133,7 +133,7 @@ class ToolDef:
                     raise ToolError.missing_field(field_name)
 
         # Type and enum checking
-        _TYPE_CHECKERS: dict[str, type | tuple[type, ...]] = {
+        _TYPE_CHECKERS: Dict[str, Union[Type, Tuple[Type, ...]]] = {
             "string": str,
             "number": (int, float),
             "integer": int,
