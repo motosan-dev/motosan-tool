@@ -1,11 +1,11 @@
-# motosan-tool
+# motosan-agent-tool
 
 Shared AI agent tool kit for Rust. Provides the core `Tool` trait, registry, and built-in tools used by [motosan-chat](https://github.com/motosan-dev/motosan-chat) and [crucible-agent](https://github.com/daiwanwei/crucible-agent).
 
 ## Quick Start
 
 ```rust
-use motosan_tool::{Tool, ToolDef, ToolResult, ToolContext, ToolRegistry};
+use motosan_agent_tool::{Tool, ToolDef, ToolResult, ToolContext, ToolRegistry};
 use serde_json::json;
 use std::sync::Arc;
 
