@@ -1,6 +1,6 @@
 [package]
 name = "motosan-agent-tool"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/motosan-dev/motosan-agent-tool"
@@ -17,8 +17,8 @@ fetch_url = ["dep:reqwest"]
 read_file = []
 read_pdf = ["dep:pdf-extract"]
 read_spreadsheet = ["dep:calamine"]
-js_eval = ["dep:boa_engine"]
-python_eval = ["tokio/process"]
+js_eval = ["dep:boa_engine", "tokio/time"]
+python_eval = ["tokio/process", "tokio/time"]
 all_tools = ["web_search", "fetch_url", "read_file", "read_pdf", "read_spreadsheet", "js_eval", "python_eval"]
 
 [dependencies]
