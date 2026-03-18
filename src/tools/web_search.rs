@@ -101,25 +101,46 @@ impl WebSearchTool {
 
     /// Determine which provider to use based on available keys and the
     /// optional SEARCH_PROVIDER / ctx.extra["search_provider"] override.
-    fn select_provider(&self, ctx: &ToolContext) -> Option<(SearchProvider, String)> {
+    fn select_provider(&self, ctx: &ToolContext) -> Result<(SearchProvider, String), String> {
         let brave_key = self.resolve_brave_api_key(ctx);
         let tavily_key = self.resolve_tavily_api_key(ctx);
 
-        // Check explicit provider preference.
+        // Check explicit provider preference (case-insensitive).
         let preference = ctx
             .get_str("search_provider")
             .map(|s| s.to_string())
             .or_else(|| std::env::var("SEARCH_PROVIDER").ok());
 
-        match preference.as_deref() {
-            Some("brave") => brave_key.map(|k| (SearchProvider::Brave, k)),
-            Some("tavily") => tavily_key.map(|k| (SearchProvider::Tavily, k)),
+        match preference
+            .as_deref()
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("brave") => brave_key
+                .map(|k| (SearchProvider::Brave, k))
+                .ok_or_else(|| {
+                    "SEARCH_PROVIDER is set to \"brave\" but BRAVE_API_KEY is not configured"
+                        .to_string()
+                }),
+            Some("tavily") => tavily_key
+                .map(|k| (SearchProvider::Tavily, k))
+                .ok_or_else(|| {
+                    "SEARCH_PROVIDER is set to \"tavily\" but TAVILY_API_KEY is not configured"
+                        .to_string()
+                }),
             _ => {
                 // Default: prefer Tavily when its key is available, else Brave.
                 if let Some(k) = tavily_key {
-                    Some((SearchProvider::Tavily, k))
+                    Ok((SearchProvider::Tavily, k))
+                } else if let Some(k) = brave_key {
+                    Ok((SearchProvider::Brave, k))
                 } else {
-                    brave_key.map(|k| (SearchProvider::Brave, k))
+                    Err(
+                        "No search API key is configured. \
+                         Set TAVILY_API_KEY (or ctx.extra[\"tavily_api_key\"]) for Tavily, \
+                         or BRAVE_API_KEY (or ctx.extra[\"brave_api_key\"]) for Brave Search."
+                            .to_string(),
+                    )
                 }
             }
         }
@@ -166,14 +187,8 @@ impl Tool for WebSearchTool {
             };
 
             let (provider, api_key) = match self.select_provider(&ctx) {
-                Some(pair) => pair,
-                None => {
-                    return ToolResult::error(
-                        "No search API key is configured. \
-                         Set TAVILY_API_KEY (or ctx.extra[\"tavily_api_key\"]) for Tavily, \
-                         or BRAVE_API_KEY (or ctx.extra[\"brave_api_key\"]) for Brave Search.",
-                    )
-                }
+                Ok(pair) => pair,
+                Err(msg) => return ToolResult::error(msg),
             };
 
             let results = match provider {
@@ -267,7 +282,6 @@ impl WebSearchTool {
         input: &WebSearchInput,
     ) -> Result<Vec<SearchResult>, ToolResult> {
         let body = json!({
-            "api_key": api_key,
             "query": input.query,
             "max_results": input.max_results,
         });
@@ -275,6 +289,7 @@ impl WebSearchTool {
         let response = self
             .http
             .post(TAVILY_SEARCH_ENDPOINT)
+            .header("Authorization", format!("Bearer {}", api_key))
             .header("Accept", "application/json")
             .json(&body)
             .send()
@@ -309,6 +324,7 @@ impl WebSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn test_ctx() -> ToolContext {
         ToolContext::new("test-agent", "test")
@@ -328,6 +344,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn should_fail_without_api_key() {
         // Temporarily remove env vars if set.
         let prev_brave = std::env::var("BRAVE_API_KEY").ok();
@@ -346,7 +363,7 @@ mod tests {
         assert!(result
             .as_text()
             .unwrap()
-            .contains("API key is not configured"));
+            .contains("API key is configured"));
 
         // Restore env vars.
         if let Some(key) = prev_brave {
@@ -372,6 +389,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn should_select_tavily_when_tavily_key_present() {
         let prev_brave = std::env::var("BRAVE_API_KEY").ok();
         let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
@@ -400,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn should_select_brave_when_only_brave_key_present() {
         let prev_brave = std::env::var("BRAVE_API_KEY").ok();
         let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
@@ -428,6 +447,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn should_respect_search_provider_override() {
         let prev_brave = std::env::var("BRAVE_API_KEY").ok();
         let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
@@ -445,6 +465,38 @@ mod tests {
         // Restore env vars.
         std::env::remove_var("BRAVE_API_KEY");
         std::env::remove_var("TAVILY_API_KEY");
+        std::env::remove_var("SEARCH_PROVIDER");
+        if let Some(k) = prev_brave {
+            std::env::set_var("BRAVE_API_KEY", k);
+        }
+        if let Some(k) = prev_tavily {
+            std::env::set_var("TAVILY_API_KEY", k);
+        }
+        if let Some(k) = prev_provider {
+            std::env::set_var("SEARCH_PROVIDER", k);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn should_error_when_provider_set_but_key_missing() {
+        let prev_brave = std::env::var("BRAVE_API_KEY").ok();
+        let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
+        let prev_provider = std::env::var("SEARCH_PROVIDER").ok();
+        std::env::remove_var("BRAVE_API_KEY");
+        std::env::remove_var("TAVILY_API_KEY");
+        std::env::set_var("SEARCH_PROVIDER", "tavily");
+
+        let tool = WebSearchTool::new();
+        let ctx = test_ctx();
+        let err = tool.select_provider(&ctx).unwrap_err();
+        assert!(err.contains("TAVILY_API_KEY is not configured"));
+
+        std::env::set_var("SEARCH_PROVIDER", "brave");
+        let err = tool.select_provider(&ctx).unwrap_err();
+        assert!(err.contains("BRAVE_API_KEY is not configured"));
+
+        // Restore env vars.
         std::env::remove_var("SEARCH_PROVIDER");
         if let Some(k) = prev_brave {
             std::env::set_var("BRAVE_API_KEY", k);

@@ -3,7 +3,7 @@
 //! Each tool is gated behind its own Cargo feature flag so consumers only
 //! compile (and link) the tools they actually need.
 
-#[cfg(feature = "web_search")]
+#[cfg(any(feature = "web_search", feature = "web_search_tavily"))]
 pub mod web_search;
 
 #[cfg(feature = "fetch_url")]
@@ -31,7 +31,7 @@ pub mod datetime;
 pub mod currency_convert;
 
 // Re-exports for convenience.
-#[cfg(feature = "web_search")]
+#[cfg(any(feature = "web_search", feature = "web_search_tavily"))]
 pub use web_search::WebSearchTool;
 
 #[cfg(feature = "fetch_url")]
