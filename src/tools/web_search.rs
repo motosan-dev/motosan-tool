@@ -8,9 +8,17 @@ use serde_json::json;
 use crate::{Tool, ToolContext, ToolDef, ToolResult};
 
 const BRAVE_SEARCH_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
+const TAVILY_SEARCH_ENDPOINT: &str = "https://api.tavily.com/search";
 const DEFAULT_MAX_RESULTS: u64 = 5;
 
-/// A tool that performs web searches using the Brave Search API.
+/// Which search provider to use at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchProvider {
+    Brave,
+    Tavily,
+}
+
+/// A tool that performs web searches using the Brave Search API or Tavily Search API.
 pub struct WebSearchTool {
     http: Client,
 }
@@ -51,6 +59,19 @@ struct BraveWebResult {
     description: Option<String>,
 }
 
+/// Tavily Search API response structures.
+#[derive(Debug, Deserialize)]
+struct TavilySearchResponse {
+    results: Vec<TavilySearchResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TavilySearchResult {
+    title: String,
+    url: String,
+    content: String,
+}
+
 impl Default for WebSearchTool {
     fn default() -> Self {
         Self::new()
@@ -64,11 +85,44 @@ impl WebSearchTool {
         }
     }
 
-    /// Resolve the API key: context extra -> env var.
-    fn resolve_api_key(&self, ctx: &ToolContext) -> Option<String> {
+    /// Resolve the Brave API key: context extra -> env var.
+    fn resolve_brave_api_key(&self, ctx: &ToolContext) -> Option<String> {
         ctx.get_str("brave_api_key")
             .map(|s| s.to_string())
             .or_else(|| std::env::var("BRAVE_API_KEY").ok())
+    }
+
+    /// Resolve the Tavily API key: context extra -> env var.
+    fn resolve_tavily_api_key(&self, ctx: &ToolContext) -> Option<String> {
+        ctx.get_str("tavily_api_key")
+            .map(|s| s.to_string())
+            .or_else(|| std::env::var("TAVILY_API_KEY").ok())
+    }
+
+    /// Determine which provider to use based on available keys and the
+    /// optional SEARCH_PROVIDER / ctx.extra["search_provider"] override.
+    fn select_provider(&self, ctx: &ToolContext) -> Option<(SearchProvider, String)> {
+        let brave_key = self.resolve_brave_api_key(ctx);
+        let tavily_key = self.resolve_tavily_api_key(ctx);
+
+        // Check explicit provider preference.
+        let preference = ctx
+            .get_str("search_provider")
+            .map(|s| s.to_string())
+            .or_else(|| std::env::var("SEARCH_PROVIDER").ok());
+
+        match preference.as_deref() {
+            Some("brave") => brave_key.map(|k| (SearchProvider::Brave, k)),
+            Some("tavily") => tavily_key.map(|k| (SearchProvider::Tavily, k)),
+            _ => {
+                // Default: prefer Tavily when its key is available, else Brave.
+                if let Some(k) = tavily_key {
+                    Some((SearchProvider::Tavily, k))
+                } else {
+                    brave_key.map(|k| (SearchProvider::Brave, k))
+                }
+            }
+        }
     }
 }
 
@@ -76,8 +130,8 @@ impl Tool for WebSearchTool {
     fn def(&self) -> ToolDef {
         ToolDef {
             name: "web_search".to_string(),
-            description: "Search the web using the Brave Search API. Returns a list of \
-                results with title, URL, and description."
+            description: "Search the web using the Brave Search API or Tavily Search API. \
+                Returns a list of results with title, URL, and description."
                 .to_string(),
             input_schema: json!({
                 "type": "object",
@@ -111,61 +165,26 @@ impl Tool for WebSearchTool {
                 Err(e) => return ToolResult::error(format!("Invalid input: {e}")),
             };
 
-            let api_key = match self.resolve_api_key(&ctx) {
-                Some(k) => k,
+            let (provider, api_key) = match self.select_provider(&ctx) {
+                Some(pair) => pair,
                 None => {
                     return ToolResult::error(
-                        "Brave Search API key is not configured. \
-                         Set it via ctx.extra[\"brave_api_key\"] or the BRAVE_API_KEY \
-                         environment variable.",
+                        "No search API key is configured. \
+                         Set TAVILY_API_KEY (or ctx.extra[\"tavily_api_key\"]) for Tavily, \
+                         or BRAVE_API_KEY (or ctx.extra[\"brave_api_key\"]) for Brave Search.",
                     )
                 }
             };
 
-            let response = match self
-                .http
-                .get(BRAVE_SEARCH_ENDPOINT)
-                .header("X-Subscription-Token", &api_key)
-                .header("Accept", "application/json")
-                .query(&[
-                    ("q", input.query.as_str()),
-                    ("count", &input.max_results.to_string()),
-                ])
-                .send()
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    return ToolResult::error(format!("Failed to call Brave Search API: {e}"))
-                }
+            let results = match provider {
+                SearchProvider::Brave => self.search_brave(&api_key, &input).await,
+                SearchProvider::Tavily => self.search_tavily(&api_key, &input).await,
             };
 
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                return ToolResult::error(format!("Brave Search API error {status}: {body}"));
-            }
-
-            let brave_response: BraveSearchResponse = match response.json().await {
+            let results = match results {
                 Ok(r) => r,
-                Err(e) => {
-                    return ToolResult::error(format!("Failed to parse Brave Search response: {e}"))
-                }
+                Err(e) => return e,
             };
-
-            let results: Vec<SearchResult> = brave_response
-                .web
-                .map(|web| {
-                    web.results
-                        .into_iter()
-                        .map(|r| SearchResult {
-                            title: r.title,
-                            url: r.url,
-                            description: r.description.unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
 
             // Format as readable text.
             let mut text = format!("Found {} results:\n\n", results.len());
@@ -195,6 +214,98 @@ impl Tool for WebSearchTool {
     }
 }
 
+impl WebSearchTool {
+    async fn search_brave(
+        &self,
+        api_key: &str,
+        input: &WebSearchInput,
+    ) -> Result<Vec<SearchResult>, ToolResult> {
+        let response = self
+            .http
+            .get(BRAVE_SEARCH_ENDPOINT)
+            .header("X-Subscription-Token", api_key)
+            .header("Accept", "application/json")
+            .query(&[
+                ("q", input.query.as_str()),
+                ("count", &input.max_results.to_string()),
+            ])
+            .send()
+            .await
+            .map_err(|e| ToolResult::error(format!("Failed to call Brave Search API: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ToolResult::error(format!(
+                "Brave Search API error {status}: {body}"
+            )));
+        }
+
+        let brave_response: BraveSearchResponse = response
+            .json()
+            .await
+            .map_err(|e| ToolResult::error(format!("Failed to parse Brave Search response: {e}")))?;
+
+        Ok(brave_response
+            .web
+            .map(|web| {
+                web.results
+                    .into_iter()
+                    .map(|r| SearchResult {
+                        title: r.title,
+                        url: r.url,
+                        description: r.description.unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    async fn search_tavily(
+        &self,
+        api_key: &str,
+        input: &WebSearchInput,
+    ) -> Result<Vec<SearchResult>, ToolResult> {
+        let body = json!({
+            "api_key": api_key,
+            "query": input.query,
+            "max_results": input.max_results,
+        });
+
+        let response = self
+            .http
+            .post(TAVILY_SEARCH_ENDPOINT)
+            .header("Accept", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ToolResult::error(format!("Failed to call Tavily Search API: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ToolResult::error(format!(
+                "Tavily Search API error {status}: {body}"
+            )));
+        }
+
+        let tavily_response: TavilySearchResponse = response
+            .json()
+            .await
+            .map_err(|e| ToolResult::error(format!("Failed to parse Tavily Search response: {e}")))?;
+
+        Ok(tavily_response
+            .results
+            .into_iter()
+            .map(|r| SearchResult {
+                title: r.title,
+                url: r.url,
+                description: r.content,
+            })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,9 +329,13 @@ mod tests {
 
     #[tokio::test]
     async fn should_fail_without_api_key() {
-        // Temporarily remove env var if set.
-        let prev = std::env::var("BRAVE_API_KEY").ok();
+        // Temporarily remove env vars if set.
+        let prev_brave = std::env::var("BRAVE_API_KEY").ok();
+        let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
+        let prev_provider = std::env::var("SEARCH_PROVIDER").ok();
         std::env::remove_var("BRAVE_API_KEY");
+        std::env::remove_var("TAVILY_API_KEY");
+        std::env::remove_var("SEARCH_PROVIDER");
 
         let tool = WebSearchTool::new();
         let ctx = test_ctx();
@@ -233,9 +348,15 @@ mod tests {
             .unwrap()
             .contains("API key is not configured"));
 
-        // Restore env var.
-        if let Some(key) = prev {
+        // Restore env vars.
+        if let Some(key) = prev_brave {
             std::env::set_var("BRAVE_API_KEY", key);
+        }
+        if let Some(key) = prev_tavily {
+            std::env::set_var("TAVILY_API_KEY", key);
+        }
+        if let Some(key) = prev_provider {
+            std::env::set_var("SEARCH_PROVIDER", key);
         }
     }
 
@@ -248,5 +369,91 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.as_text().unwrap().contains("Invalid input"));
+    }
+
+    #[test]
+    fn should_select_tavily_when_tavily_key_present() {
+        let prev_brave = std::env::var("BRAVE_API_KEY").ok();
+        let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
+        let prev_provider = std::env::var("SEARCH_PROVIDER").ok();
+        std::env::remove_var("BRAVE_API_KEY");
+        std::env::set_var("TAVILY_API_KEY", "tvly-test-key");
+        std::env::remove_var("SEARCH_PROVIDER");
+
+        let tool = WebSearchTool::new();
+        let ctx = test_ctx();
+        let (provider, key) = tool.select_provider(&ctx).unwrap();
+        assert_eq!(provider, SearchProvider::Tavily);
+        assert_eq!(key, "tvly-test-key");
+
+        // Restore env vars.
+        std::env::remove_var("TAVILY_API_KEY");
+        if let Some(k) = prev_brave {
+            std::env::set_var("BRAVE_API_KEY", k);
+        }
+        if let Some(k) = prev_tavily {
+            std::env::set_var("TAVILY_API_KEY", k);
+        }
+        if let Some(k) = prev_provider {
+            std::env::set_var("SEARCH_PROVIDER", k);
+        }
+    }
+
+    #[test]
+    fn should_select_brave_when_only_brave_key_present() {
+        let prev_brave = std::env::var("BRAVE_API_KEY").ok();
+        let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
+        let prev_provider = std::env::var("SEARCH_PROVIDER").ok();
+        std::env::set_var("BRAVE_API_KEY", "brave-test-key");
+        std::env::remove_var("TAVILY_API_KEY");
+        std::env::remove_var("SEARCH_PROVIDER");
+
+        let tool = WebSearchTool::new();
+        let ctx = test_ctx();
+        let (provider, key) = tool.select_provider(&ctx).unwrap();
+        assert_eq!(provider, SearchProvider::Brave);
+        assert_eq!(key, "brave-test-key");
+
+        // Restore env vars.
+        std::env::remove_var("BRAVE_API_KEY");
+        if let Some(k) = prev_brave {
+            std::env::set_var("BRAVE_API_KEY", k);
+        }
+        if let Some(k) = prev_tavily {
+            std::env::set_var("TAVILY_API_KEY", k);
+        }
+        if let Some(k) = prev_provider {
+            std::env::set_var("SEARCH_PROVIDER", k);
+        }
+    }
+
+    #[test]
+    fn should_respect_search_provider_override() {
+        let prev_brave = std::env::var("BRAVE_API_KEY").ok();
+        let prev_tavily = std::env::var("TAVILY_API_KEY").ok();
+        let prev_provider = std::env::var("SEARCH_PROVIDER").ok();
+        std::env::set_var("BRAVE_API_KEY", "brave-test-key");
+        std::env::set_var("TAVILY_API_KEY", "tvly-test-key");
+        std::env::set_var("SEARCH_PROVIDER", "brave");
+
+        let tool = WebSearchTool::new();
+        let ctx = test_ctx();
+        let (provider, key) = tool.select_provider(&ctx).unwrap();
+        assert_eq!(provider, SearchProvider::Brave);
+        assert_eq!(key, "brave-test-key");
+
+        // Restore env vars.
+        std::env::remove_var("BRAVE_API_KEY");
+        std::env::remove_var("TAVILY_API_KEY");
+        std::env::remove_var("SEARCH_PROVIDER");
+        if let Some(k) = prev_brave {
+            std::env::set_var("BRAVE_API_KEY", k);
+        }
+        if let Some(k) = prev_tavily {
+            std::env::set_var("TAVILY_API_KEY", k);
+        }
+        if let Some(k) = prev_provider {
+            std::env::set_var("SEARCH_PROVIDER", k);
+        }
     }
 }
