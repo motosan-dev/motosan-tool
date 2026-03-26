@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.1] — 2026-03-26
+## [0.2.2] — 2026-03-26
 
 ### Added
 - **DatetimeTool** built-in — `get_current_datetime`, `date_add`, `date_diff` with timezone support (feature: `datetime`)
