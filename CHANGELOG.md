@@ -7,10 +7,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.2.2] — 2026-03-26
 
 ### Added
-- **DatetimeTool** built-in — `get_current_datetime`, `date_add`, `date_diff` with timezone support (feature: `datetime`)
-- **CurrencyConvertTool** — live exchange rates via free APIs with 1-hour cache and automatic fallback (feature: `currency_convert`)
-- **CostCalculatorTool** — multi-currency cost breakdown with automatic conversion (feature: `cost_calculator`)
-- **GeneratePdfTool** — generate PDF files from plain text or basic Markdown with path traversal protection (feature: `generate_pdf`)
 - **Browser tools** — 7 tools powered by `agent-browser` CLI (feature: `browser`):
   - `BrowserNavigateTool` — open URLs with validation
   - `BrowserActTool` — click, fill, type, hover, select, check, press
@@ -19,6 +15,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `BrowserScreenshotTool` — take page screenshots
   - `BrowserWaitTool` — wait for navigation, selector, or network idle
   - `BrowserAuthTool` — save/load authentication state
+
+### Changed
+- README: added built-in tools table (18 tools), multi-language support section, Python quick start
+- Aligned TypeScript package version to 0.2.2
+
+## [0.2.1] — 2026-03-26
+
+### Added
+- **DatetimeTool** built-in — `get_current_datetime`, `date_add`, `date_diff` with timezone support (feature: `datetime`)
+- **CurrencyConvertTool** — live exchange rates via free APIs with 1-hour cache and automatic fallback (feature: `currency_convert`)
+- **CostCalculatorTool** — multi-currency cost breakdown with automatic conversion (feature: `cost_calculator`)
+- **GeneratePdfTool** — generate PDF files from plain text or basic Markdown with path traversal protection (feature: `generate_pdf`)
 - **Python `FunctionTool`** class and `@tool` decorator for defining tools from plain functions
 - **Python `DatetimeTool`** built-in (mirrors Rust API)
 - Release metadata in `pyproject.toml` and `package.json`
