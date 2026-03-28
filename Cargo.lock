@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "motosan-agent-tool"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "boa_engine",
  "calamine",
