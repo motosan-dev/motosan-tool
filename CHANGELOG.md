@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-03-28
+
+### Added
+- **ToolContext-based browser session isolation** (#34): All browser tools now read `ctx.get_str("browser_session")` and inject `--session-name <value>` into `agent-browser` commands. Enables thread-safe parallel browser execution when the caller sets `browser_session` in ToolContext.
+- `browser_common::command_with_session()` — builds `agent-browser` Command with optional session name
+- `browser_common::browser_session()` — extracts session from ToolContext for async-safe usage
+
 ## [0.2.2] — 2026-03-26
 
 ### Added
