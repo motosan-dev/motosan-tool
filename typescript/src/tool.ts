@@ -155,11 +155,14 @@ export class ToolResult {
 export class ToolContext {
   readonly callerId: string;
   readonly platform: string;
+  /** Working directory for this call. File tools resolve relative paths against this. */
+  readonly cwd?: string;
   readonly extra: Record<string, unknown>;
 
-  constructor(callerId: string, platform: string, extra: Record<string, unknown> = {}) {
+  constructor(callerId: string, platform: string, extra: Record<string, unknown> = {}, cwd?: string) {
     this.callerId = callerId;
     this.platform = platform;
+    this.cwd = cwd;
     this.extra = extra;
   }
 
@@ -167,11 +170,16 @@ export class ToolContext {
     return new ToolContext(callerId, platform);
   }
 
+  /** Returns a new ToolContext with cwd set. */
+  withCwd(cwd: string): ToolContext {
+    return new ToolContext(this.callerId, this.platform, this.extra, cwd);
+  }
+
   /**
    * Returns a new ToolContext with the given key-value pair added to extra.
    */
   with(key: string, value: unknown): ToolContext {
-    return new ToolContext(this.callerId, this.platform, { ...this.extra, [key]: value });
+    return new ToolContext(this.callerId, this.platform, { ...this.extra, [key]: value }, this.cwd);
   }
 
   getStr(key: string): string | undefined {

@@ -352,6 +352,20 @@ class TestToolContext:
         assert ctx.get_u64("budget") == 5
         assert ctx.get_str("missing") is None
 
+    def test_cwd_defaults_to_none(self) -> None:
+        ctx = ToolContext.new("a", "b")
+        assert ctx.cwd is None
+
+    def test_with_cwd_sets_path(self) -> None:
+        from pathlib import Path
+        ctx = ToolContext.new("a", "b").with_cwd("/tmp/work")
+        assert ctx.cwd == Path("/tmp/work")
+
+    def test_with_cwd_accepts_path_object(self) -> None:
+        from pathlib import Path
+        ctx = ToolContext.new("a", "b").with_cwd(Path("/tmp/work"))
+        assert ctx.cwd == Path("/tmp/work")
+
 
 # ---------------------------------------------------------------------------
 # Tool ABC

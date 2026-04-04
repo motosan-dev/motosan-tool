@@ -17,6 +17,7 @@ from __future__ import annotations
 import abc
 import inspect
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Tuple, Type, Union
 
 from .error import ToolError
@@ -277,11 +278,17 @@ class ToolContext:
 
     caller_id: str
     platform: str
+    cwd: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def new(cls, caller_id: str, platform: str) -> ToolContext:
         return cls(caller_id=caller_id, platform=platform)
+
+    def with_cwd(self, cwd: str | Path) -> ToolContext:
+        """Set the working directory for this call (builder pattern)."""
+        self.cwd = Path(cwd)
+        return self
 
     def with_(self, key: str, value: Any) -> ToolContext:
         """Insert an extra field (builder pattern).

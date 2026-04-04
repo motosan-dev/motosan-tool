@@ -57,8 +57,9 @@ impl Tool for ReadFileTool {
     fn call(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Pin<Box<dyn Future<Output = ToolResult> + Send + '_>> {
+        let cwd = ctx.cwd.clone();
         Box::pin(async move {
             let input: ReadFileInput = match serde_json::from_value(args) {
                 Ok(v) => v,
@@ -72,7 +73,14 @@ impl Tool for ReadFileTool {
                 );
             }
 
-            let path = std::path::Path::new(&input.path);
+            let resolved = if std::path::Path::new(&input.path).is_absolute() {
+                std::path::PathBuf::from(&input.path)
+            } else if let Some(base) = &cwd {
+                base.join(&input.path)
+            } else {
+                std::path::PathBuf::from(&input.path)
+            };
+            let path = resolved.as_path();
             if !path.exists() {
                 return ToolResult::error(format!("File not found: {}", input.path));
             }
@@ -188,6 +196,23 @@ mod tests {
 
         assert!(!result.is_error);
         assert_eq!(result.as_text().unwrap(), "Hello from test file");
+    }
+
+    #[tokio::test]
+    async fn should_resolve_relative_path_via_ctx_cwd() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = dir.path().join("relative.txt");
+        let mut file = std::fs::File::create(&file_path).expect("create file");
+        write!(file, "relative content").expect("write file");
+
+        let tool = ReadFileTool::new();
+        let ctx = ToolContext::new("test-agent", "test").with_cwd(dir.path());
+        let input = json!({"path": "relative.txt"});
+        let result = tool.call(input, &ctx).await;
+
+        assert!(!result.is_error);
+        assert_eq!(result.as_text().unwrap(), "relative content");
     }
 
     #[tokio::test]

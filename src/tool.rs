@@ -260,6 +260,9 @@ pub struct ToolContext {
     pub caller_id: String,
     /// Platform identifier ("crucible", "line", "telegram", "discord", etc.).
     pub platform: String,
+    /// Working directory for this tool call. When set, file tools resolve
+    /// relative paths against this directory instead of the process cwd.
+    pub cwd: Option<std::path::PathBuf>,
     /// Platform-specific key-value extensions.
     pub extra: HashMap<String, Value>,
 }
@@ -269,8 +272,15 @@ impl ToolContext {
         Self {
             caller_id: caller_id.into(),
             platform: platform.into(),
+            cwd: None,
             extra: HashMap::new(),
         }
+    }
+
+    /// Set the working directory for this call (builder pattern).
+    pub fn with_cwd(mut self, cwd: impl Into<std::path::PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
     }
 
     /// Insert an extra field (builder pattern).
@@ -476,5 +486,33 @@ mod tests {
         assert_eq!(ctx.get_str("org_id"), Some("motosan"));
         assert_eq!(ctx.get_u64("budget"), Some(5));
         assert_eq!(ctx.get_str("missing"), None);
+    }
+
+    #[test]
+    fn tool_context_cwd_defaults_to_none() {
+        let ctx = ToolContext::new("agent-1", "crucible");
+        assert!(ctx.cwd.is_none());
+    }
+
+    #[test]
+    fn tool_context_with_cwd_sets_field() {
+        let ctx = ToolContext::new("agent-1", "crucible").with_cwd("/tmp/work");
+        assert_eq!(ctx.cwd.as_deref(), Some(std::path::Path::new("/tmp/work")));
+    }
+
+    #[test]
+    fn serde_roundtrip_tool_context_with_cwd() {
+        let ctx = ToolContext::new("agent-1", "crucible").with_cwd("/tmp/work");
+        let json = serde_json::to_string(&ctx).unwrap();
+        let back: ToolContext = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cwd.as_deref(), Some(std::path::Path::new("/tmp/work")));
+    }
+
+    #[test]
+    fn serde_roundtrip_tool_context_without_cwd_is_backward_compatible() {
+        // Existing serialized contexts without the cwd field must still deserialize.
+        let json = r#"{"caller_id":"agent-1","platform":"crucible","extra":{}}"#;
+        let ctx: ToolContext = serde_json::from_str(json).unwrap();
+        assert!(ctx.cwd.is_none());
     }
 }

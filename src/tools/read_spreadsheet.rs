@@ -75,8 +75,9 @@ impl Tool for ReadSpreadsheetTool {
     fn call(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Pin<Box<dyn Future<Output = ToolResult> + Send + '_>> {
+        let cwd = ctx.cwd.clone();
         Box::pin(async move {
             let input: ReadSpreadsheetInput = match serde_json::from_value(args) {
                 Ok(v) => v,
@@ -86,18 +87,27 @@ impl Tool for ReadSpreadsheetTool {
             let max_rows = input.max_rows.unwrap_or(DEFAULT_MAX_ROWS);
             let path_lower = input.path.to_lowercase();
 
+            let resolved_path = if std::path::Path::new(&input.path).is_absolute() {
+                std::path::PathBuf::from(&input.path)
+            } else if let Some(base) = &cwd {
+                base.join(&input.path)
+            } else {
+                std::path::PathBuf::from(&input.path)
+            };
+            let resolved_str = resolved_path.to_string_lossy();
+
             // Read file bytes.
-            let bytes = match std::fs::read(&input.path) {
+            let bytes = match std::fs::read(&resolved_path) {
                 Ok(b) => b,
                 Err(e) => return ToolResult::error(format!("Failed to read file: {e}")),
             };
 
             let result = if path_lower.ends_with(".csv") {
-                parse_csv(&bytes, max_rows, &input.path)
+                parse_csv(&bytes, max_rows, &resolved_str)
             } else if path_lower.ends_with(".xlsx") {
-                parse_xlsx(&bytes, input.sheet.as_deref(), max_rows, &input.path)
+                parse_xlsx(&bytes, input.sheet.as_deref(), max_rows, &resolved_str)
             } else if path_lower.ends_with(".xls") {
-                parse_xls(&bytes, input.sheet.as_deref(), max_rows, &input.path)
+                parse_xls(&bytes, input.sheet.as_deref(), max_rows, &resolved_str)
             } else {
                 Err("Unsupported file format. Supported formats: .xlsx, .xls, .csv".to_string())
             };
@@ -443,6 +453,30 @@ mod tests {
         assert_eq!(result.rows[0]["price"], 19.99);
         assert_eq!(result.rows[0]["qty"], 1.5);
         assert_eq!(result.rows[1]["qty"], 100);
+    }
+
+    #[tokio::test]
+    async fn should_resolve_relative_path_via_ctx_cwd() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let csv_path = dir.path().join("data.csv");
+        let mut f = std::fs::File::create(&csv_path).expect("create csv");
+        write!(f, "name,score\nAlice,100\nBob,90\n").expect("write csv");
+
+        let tool = ReadSpreadsheetTool::new();
+        let ctx = ToolContext::new("test-agent", "test").with_cwd(dir.path());
+        let input = json!({"path": "data.csv"});
+        let result = tool.call(input, &ctx).await;
+
+        assert!(!result.is_error, "Expected success but got: {:?}", result);
+        let json_content = result.content.first().unwrap();
+        match json_content {
+            crate::ToolContent::Json(v) => {
+                assert_eq!(v["row_count"], 2);
+                assert_eq!(v["rows"][0]["name"], "Alice");
+            }
+            _ => panic!("Expected JSON content"),
+        }
     }
 
     #[test]

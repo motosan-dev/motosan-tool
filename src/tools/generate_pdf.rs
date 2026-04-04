@@ -302,13 +302,21 @@ impl Tool for GeneratePdfTool {
     fn call(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Pin<Box<dyn Future<Output = ToolResult> + Send + '_>> {
+        let cwd = ctx.cwd.clone();
         Box::pin(async move {
-            let input: GeneratePdfInput = match serde_json::from_value(args) {
+            let mut input: GeneratePdfInput = match serde_json::from_value(args) {
                 Ok(v) => v,
                 Err(e) => return ToolResult::error(format!("Invalid input: {e}")),
             };
+
+            // Resolve relative output_path via ctx.cwd.
+            if !std::path::Path::new(&input.output_path).is_absolute() {
+                if let Some(base) = &cwd {
+                    input.output_path = base.join(&input.output_path).to_string_lossy().into_owned();
+                }
+            }
 
             // Path traversal protection.
             if input.output_path.contains("..") {
@@ -487,6 +495,25 @@ mod tests {
             }
             _ => panic!("Expected JSON content"),
         }
+    }
+
+    #[tokio::test]
+    async fn should_resolve_relative_output_path_via_ctx_cwd() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+
+        let tool = GeneratePdfTool::new();
+        let ctx = ToolContext::new("test-agent", "test").with_cwd(dir.path());
+        let input = json!({
+            "content": "Hello from cwd test",
+            "output_path": "relative.pdf"
+        });
+        let result = tool.call(input, &ctx).await;
+
+        assert!(!result.is_error, "Expected success but got: {:?}", result);
+        let output_path = dir.path().join("relative.pdf");
+        assert!(output_path.exists(), "PDF should be written to cwd/relative.pdf");
+        let bytes = std::fs::read(&output_path).expect("read pdf");
+        assert!(bytes.starts_with(b"%PDF"), "File should be a valid PDF");
     }
 
     #[test]

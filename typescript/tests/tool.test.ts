@@ -178,6 +178,22 @@ describe("ToolContext", () => {
     expect(ctx.getNum("nope")).toBeUndefined();
     expect(ctx.getBool("nope")).toBeUndefined();
   });
+
+  it("cwd defaults to undefined", () => {
+    const ctx = ToolContext.create("a", "b");
+    expect(ctx.cwd).toBeUndefined();
+  });
+
+  it("withCwd() sets the cwd field", () => {
+    const ctx = ToolContext.create("a", "b").withCwd("/tmp/work");
+    expect(ctx.cwd).toBe("/tmp/work");
+  });
+
+  it("with() preserves cwd", () => {
+    const ctx = ToolContext.create("a", "b").withCwd("/tmp/work").with("key", "val");
+    expect(ctx.cwd).toBe("/tmp/work");
+    expect(ctx.getStr("key")).toBe("val");
+  });
 });
 
 // ---------------------------------------------------------------------------

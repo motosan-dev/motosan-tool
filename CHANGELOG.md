@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.2] — 2026-04-04
+
+### Added
+- **`ToolContext::cwd`** (#37): typed `Option<PathBuf>` field for per-call working directory override. Replaces the untyped `extra["cwd"]` pattern with a first-class, discoverable API.
+- `ToolContext::with_cwd()` builder method to set the working directory.
+- `ReadFileTool`, `ReadPdfTool`, `ReadSpreadsheetTool`, and `GeneratePdfTool` all resolve relative paths against `ctx.cwd` when set; absolute paths and URLs are unchanged.
+- TypeScript `ToolContext.withCwd(path)` and `cwd?: string` field (package 0.2.3).
+- Python `ToolContext.with_cwd(path)` and `cwd: Path | None` field (package 0.2.3).
+
 ## [0.3.0] — 2026-03-28
 
 ### Added

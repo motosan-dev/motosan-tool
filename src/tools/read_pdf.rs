@@ -218,8 +218,9 @@ impl Tool for ReadPdfTool {
     fn call(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Pin<Box<dyn Future<Output = ToolResult> + Send + '_>> {
+        let cwd = ctx.cwd.clone();
         Box::pin(async move {
             let mut input: ReadPdfInput = match serde_json::from_value(args) {
                 Ok(v) => v,
@@ -239,7 +240,14 @@ impl Tool for ReadPdfTool {
                     Err(e) => return ToolResult::error(e),
                 }
             } else {
-                match Self::read_local_pdf(&input.source) {
+                let resolved = if std::path::Path::new(&input.source).is_absolute() {
+                    input.source.clone()
+                } else if let Some(base) = &cwd {
+                    base.join(&input.source).to_string_lossy().into_owned()
+                } else {
+                    input.source.clone()
+                };
+                match Self::read_local_pdf(&resolved) {
                     Ok(b) => b,
                     Err(e) => return ToolResult::error(e),
                 }
@@ -310,6 +318,35 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.as_text().unwrap().contains("File not found"));
+    }
+
+    #[tokio::test]
+    async fn should_resolve_relative_path_via_ctx_cwd() {
+        // Copy a minimal valid PDF into a temp dir, then reference it by filename only.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        // Use a tiny hand-crafted valid PDF (1 page, empty body).
+        let minimal_pdf: &[u8] = b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n\
+            2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n\
+            3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\n\
+            xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n\
+            0000000058 00000 n \n0000000115 00000 n \n\
+            trailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF";
+        let pdf_name = "sample.pdf";
+        std::fs::write(dir.path().join(pdf_name), minimal_pdf).expect("write pdf");
+
+        let tool = ReadPdfTool::new();
+        let ctx = ToolContext::new("test-agent", "test").with_cwd(dir.path());
+        let input = json!({"source": pdf_name});
+        let result = tool.call(input, &ctx).await;
+
+        // The PDF may fail to parse (minimal PDF), but it must NOT fail with "File not found".
+        if result.is_error {
+            assert!(
+                !result.as_text().unwrap().contains("File not found"),
+                "Should have found the file via cwd, got: {}",
+                result.as_text().unwrap()
+            );
+        }
     }
 
     #[test]
