@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **`WebSearchTool` Tavily support** (#29): `WebSearchTool` now supports Tavily Search API alongside Brave. Set `TAVILY_API_KEY` to use Tavily (preferred when both keys are present), or `BRAVE_API_KEY` for Brave. Use `SEARCH_PROVIDER=tavily|brave` (case-insensitive) to force a specific provider. Provider-specific error messages when a key is missing for the requested provider.
+
 ## [0.3.2] — 2026-04-04
 
 ### Added

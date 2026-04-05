@@ -84,7 +84,7 @@ All tools are feature-gated. Enable individually or use `all_tools` to enable al
 
 | Tool | Feature | Description |
 |------|---------|-------------|
-| `WebSearchTool` | `web_search` | Brave Search API integration |
+| `WebSearchTool` | `web_search` | Web search via Brave or Tavily (set `BRAVE_API_KEY` or `TAVILY_API_KEY`; override with `SEARCH_PROVIDER=brave\|tavily`) |
 | `FetchUrlTool` | `fetch_url` | HTTP fetch with HTML extraction + SSRF protection |
 | `ReadFileTool` | `read_file` | Local file reader with path traversal protection |
 | `ReadPdfTool` | `read_pdf` | PDF text extraction (local files and URLs) |
